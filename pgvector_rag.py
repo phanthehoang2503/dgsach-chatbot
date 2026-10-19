@@ -24,64 +24,66 @@ ollama_client = ollama.Client(host="http://127.0.0.1:11434")
 #     )
 #     return res.embeddings[0].values
 
+
 def get_embedding(text: str) -> list[float]:
-  res = ollama_client.embeddings(
-    model="qwen3-embedding:0.6B",
-    prompt=text
-  )
-  return res["embedding"]
+    res = ollama_client.embeddings(model="qwen3-embedding:0.6B", prompt=text)
+    return res["embedding"]
 
 
 # kết nối db vs lưu vector
 conn = psycopg.connect(
-  host=os.getenv("DB_HOST"),
-  port=os.getenv("DB_PORT"),
-  dbname=os.getenv("DB_NAME"),
-  user=os.getenv("DB_USER"),
-  password=os.getenv("DB_PASS"),
-  autocommit=True
+    host=os.getenv("DB_HOST"),
+    port=os.getenv("DB_PORT"),
+    dbname=os.getenv("DB_NAME"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASS"),
+    autocommit=True,
 )
 register_vector(conn)
 
 with conn.cursor() as cur:
-  cur.execute("DROP TABLE IF EXISTS documents;")
-  cur.execute("""
+    cur.execute("DROP TABLE IF EXISTS documents;")
+    cur.execute(
+        """
   CREATE TABLE IF NOT EXISTS documents (
             id serial PRIMARY KEY,
             content text,
             embedding vector(1024)
             );
-  """)
-  cur.execute("DELETE FROM documents;")
-
-  with open("data.txt", "r", encoding="utf-8") as f:
-    chunks = [line.strip() for line in f.read().split("\n") if line.strip()]
-
-  print("Đang tạo embedding và lưu vào vectordb")
-  for chunk in chunks:
-    vec = get_embedding(chunk)
-    cur.execute(
-      "INSERT INTO documents (content, embedding) VALUES (%s, %s);",
-      (chunk, vec)
+  """
     )
-  print(f"Đã nạp {len(chunks)} đoạn vào vectorDB")
+    cur.execute("DELETE FROM documents;")
 
-  # truy xuat vector
-  user_query = input()
-  # question_vec = get_embedding(user_query, task_type="RETRIEVAL_QUERY")
-  question_vec = get_embedding(user_query)
+    with open("data.txt", "r", encoding="utf-8") as f:
+        chunks = [line.strip() for line in f.read().split("\n") if line.strip()]
 
-  cur.execute("""
+    print("Đang tạo embedding và lưu vào vectordb")
+    for chunk in chunks:
+        vec = get_embedding(chunk)
+        cur.execute(
+            "INSERT INTO documents (content, embedding) VALUES (%s, %s);", (chunk, vec)
+        )
+    print(f"Đã nạp {len(chunks)} đoạn vào vectorDB")
+
+    # truy xuat vector
+    user_query = input()
+    # question_vec = get_embedding(user_query, task_type="RETRIEVAL_QUERY")
+    question_vec = get_embedding(user_query)
+
+    cur.execute(
+        """
     SELECT content, embedding <=> %s::vector AS distance
     FROM documents
     ORDER BY distance
     LIMIT 2
-  """, (question_vec,))
-  rows = cur.fetchall()
-  retrieved_ctx = [r[0] for r in rows]
-  ctx_text = "\n".join(retrieved_ctx)
-  print("Đoạn tìm thấy từ vectorDB")
-  print(ctx_text)
+  """,
+        (question_vec,),
+    )
+    rows = cur.fetchall()
+    retrieved_ctx = [r[0] for r in rows]
+    ctx_text = "\n".join(retrieved_ctx)
+    print("Đoạn tìm thấy từ vectorDB")
+    print(ctx_text)
 conn.close()
 
 
