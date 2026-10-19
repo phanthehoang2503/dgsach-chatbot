@@ -1,12 +1,30 @@
+import os
 import unittest
 from src.database import get_connection, init_db
 from src.embeddings import get_embedding
 
 
+def validate_test_database():
+    """Bảo vệ dữ liệu: Chỉ cho phép test xóa bảng trên database test."""
+    test_db = os.getenv("TEST_DB_NAME")
+    if test_db:
+        os.environ["DB_NAME"] = test_db
+    db_name = os.getenv("DB_NAME", "")
+    is_safe = "test" in db_name.lower() or os.getenv(
+        "ALLOW_DESTRUCTIVE_TESTS", ""
+    ).lower() in ("true", "1")
+    if not is_safe:
+        raise unittest.SkipTest(
+            f"Bảo vệ dữ liệu: Database '{db_name}' không phải là database test. "
+            "Để chạy integration tests, vui lòng cấu hình TEST_DB_NAME, "
+            "hoặc đặt tên DB_NAME chứa chữ 'test', hoặc gán ALLOW_DESTRUCTIVE_TESTS=1."
+        )
+
+
 class TestIngestPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        """Khởi tạo bảng test sạch trước khi test."""
+        validate_test_database()
         init_db(vector_dim=1024, drop_old=True)
 
     def test_embed_and_insert_flow(self):
