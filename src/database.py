@@ -16,12 +16,14 @@ def get_connection(register_pgvector: bool = True):
         password=os.getenv("DB_PASS"),
         autocommit=True,
     )
-    if register_vector:
+    if register_pgvector:
         register_vector(conn)
     return conn
 
 
-def init_db(vector_dim: int = 1024, drop_old: bool = False):
+def init_db(
+    vector_dim: int = 1024, drop_old: bool = False, table_name: str = "documents"
+):
     """Tạo bảng documents nếu chưa tồn tại"""
     # 1: đảm bảo extension vector của postgresql được tạo
     with get_connection(register_pgvector=False) as conn:
@@ -32,11 +34,11 @@ def init_db(vector_dim: int = 1024, drop_old: bool = False):
     with get_connection(register_pgvector=True) as conn:
         with conn.cursor() as cur:
             if drop_old:
-                cur.execute("DROP TABLE IF EXISTS documents;")
+                cur.execute(f"DROP TABLE IF EXISTS {table_name};")
 
             cur.execute(
                 f"""
-                    CREATE TABLE IF NOT EXISTS documents (
+                    CREATE TABLE IF NOT EXISTS {table_name} (
                       id serial PRIMARY KEY,
                       content text,
                       embedding vector({vector_dim})

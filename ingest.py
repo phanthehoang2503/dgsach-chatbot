@@ -33,8 +33,8 @@ def ingest_data(file_path: str = DATA_FILE):
     print(f"1. đã đọc {total} đoạn văn bản từ {file_path}.")
 
     # Khởi tạo / làm sạch dữ liệu
-    print("2. đang chuẩn bị bảng document trong db")
-    init_db(vector_dim=VECTOR_DIM, drop_old=True)
+    print(f"2. đang chuẩn bị bảng {STAGING_TABLE} trong db")
+    init_db(vector_dim=VECTOR_DIM, drop_old=True, table_name=STAGING_TABLE)
 
     # Embedding và lưu vào DB
     print("3. đang tạo embedding và staging...")
@@ -44,7 +44,7 @@ def ingest_data(file_path: str = DATA_FILE):
                 for idx, chunk in enumerate(chunks, 1):
                     vec = get_embedding(chunk)
                     cur.execute(
-                        "INSERT INTO {STAGING_TABLE} (content, embedding) VALUES (%s, %s);",
+                        f"INSERT INTO {STAGING_TABLE} (content, embedding) VALUES (%s, %s);",
                         (chunk, vec),
                     )
                     print(f" -> [{idx}/{total}] đã nạp: {chunk[:40]}...")
