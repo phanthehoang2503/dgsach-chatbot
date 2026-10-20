@@ -3,14 +3,16 @@ import uuid
 from src.database import swap_tables
 from src.database import get_connection, init_db
 from src.embeddings import get_embedding
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DATA_FILE = (
     os.path.join("data", "data.txt")
     if os.path.exists(os.path.join("data", "data.txt"))
     else "data.txt"
 )
-# model embedding bao nhiêu chiều thì vector_dim nhiêu đấy chiều
-VECTOR_DIM = 1024  # VD: qwen3-embedding:0.6b
+VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))  # VD: qwen3-embedding:0.6b
 
 
 def load_chunks(file_path: str) -> list[str]:
