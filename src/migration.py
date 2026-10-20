@@ -21,7 +21,7 @@ def swap_table(
                 f"""
                   DROP TABLE IF EXISTS {target_table}_old;
                   ALTER TABLE IF EXISTS {target_table} RENAME TO {target_table}_old;
-                  ALTER TABLE IF {staging_table} RENAME TO {target_table};
+                  ALTER TABLE {staging_table} RENAME TO {target_table};
                   DROP TABLE IF EXISTS {target_table}_old;
                 """
             )
