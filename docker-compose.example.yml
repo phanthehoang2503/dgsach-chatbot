@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 25032004
+      POSTGRES_PASSWORD: your_password_here
       POSTGRES_DB: vectordb
     ports:
       - "5434:5432"
@@ -33,5 +33,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
 volumes:
   pgvector_data:
