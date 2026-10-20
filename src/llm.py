@@ -2,9 +2,10 @@ import os
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+OLLAMA_HOST = os.getenv("OLLAMA_HOST")
 ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.

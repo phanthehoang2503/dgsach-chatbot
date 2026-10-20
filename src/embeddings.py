@@ -2,9 +2,9 @@ import os
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
-ollama_client = ollama.Client(host=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
+ollama_client = ollama.Client(host=os.getenv("OLLAMA_HOST"))
 
 
 def get_embedding(text: str, model: str = None) -> list[float]:
