@@ -1,16 +1,25 @@
 import os
 import re
+import threading
+from functools import lru_cache
 
 import ollama
 from dotenv import load_dotenv
 
-from src.errors import ConfigError
+from src.errors import ConfigError, UpstreamUnavailableError
 
 load_dotenv()
 
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST")
-ollama_client = ollama.Client(host=OLLAMA_HOST)
+@lru_cache
+def get_ollama_client() -> ollama.Client:
+    return ollama.Client(
+        host=os.getenv("OLLAMA_HOST"),
+        timeout=_parse_float_env("OLLAMA_TIMEOUT", 60.0),
+    )
+
+
+_llm_slots = threading.BoundedSemaphore(int(os.getenv("LLM_MAX_CONCURRENCY") or 4))
 
 _VI_DIACRITICS_RE = re.compile(
     r"[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]",
@@ -98,12 +107,17 @@ def generate_answer(query: str, context: list[str], model: str | None = None) ->
     user_message = (
         f"<context>\n{context_text}\n</context>\n\n<question>\n{query}\n</question>"
     )
-    res = ollama_client.chat(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        options={"temperature": temperature},  # càng cao càng halu
-    )
+    if not _llm_slots.acquire(timeout=5):
+        raise UpstreamUnavailableError("LLM đang quá tải")
+    try:
+        res = get_ollama_client().chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            options={"temperature": temperature},  # càng cao càng halu
+        )
+    finally:
+        _llm_slots.release()
     return res["message"]["content"]

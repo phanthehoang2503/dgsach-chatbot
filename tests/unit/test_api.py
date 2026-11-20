@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from api import app
+from api import app, limiter
 from src.errors import (
     ConfigError,
     IndexNotReadyError,
@@ -15,6 +15,13 @@ from src.errors import (
 )
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 def test_health_returns_200_when_db_reachable():
@@ -105,3 +112,26 @@ def test_chat_endpoint_does_not_leak_internal_details():
     assert res.status_code == 503
     assert "ollama" not in res.text
     assert "1024" not in res.text
+
+
+def test_chat_endpoint_rate_limit(monkeypatch):
+    monkeypatch.setenv("CHAT_RATE_LIMIT", "2/minute")
+    limiter.reset()
+    with (
+        patch("api.retrieve_ctx", return_value=["Doc 1"]),
+        patch("api.generate_answer", return_value="Answer"),
+    ):
+        assert client.post("/api/v1/chat", json={"query": "Hỏi 1"}).status_code == 200
+        assert client.post("/api/v1/chat", json={"query": "Hỏi 2"}).status_code == 200
+        res = client.post("/api/v1/chat", json={"query": "Hỏi 3"})
+    assert res.status_code == 429
+
+
+def test_request_body_over_16kb_returns_413():
+    payload = '{"query": "' + ("a" * (20 * 1024)) + '"}'
+    res = client.post(
+        "/api/v1/chat",
+        content=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 413

@@ -29,6 +29,20 @@ def test_get_connection_skips_pgvector_when_disabled():
     mock_register.assert_not_called()
 
 
+def test_get_connection_passes_timeouts(monkeypatch):
+    monkeypatch.setenv("DB_CONNECT_TIMEOUT", "7")
+    mock_conn = MagicMock()
+    with (
+        patch("src.database.psycopg.connect", return_value=mock_conn) as mock_connect,
+        patch("src.database.register_vector"),
+    ):
+        get_connection(statement_timeout_ms=2500)
+
+    kwargs = mock_connect.call_args.kwargs
+    assert kwargs["connect_timeout"] == 7
+    assert kwargs["options"] == "-c statement_timeout=2500"
+
+
 def test_init_db_uses_single_connection_and_creates_not_null_table_and_hnsw_index():
     mock_cur = MagicMock()
     mock_conn = MagicMock()

@@ -8,8 +8,17 @@ from psycopg import sql
 load_dotenv()
 
 
-def get_connection(register_pgvector: bool = True, autocommit: bool = True):
+def get_connection(
+    register_pgvector: bool = True,
+    autocommit: bool = True,
+    statement_timeout_ms: int | None = None,
+):
     """Tạo và cấu hình kết nối tới PostgreSQL/pgvector."""
+    kwargs: dict[str, object] = {
+        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT") or 5),
+    }
+    if statement_timeout_ms:
+        kwargs["options"] = f"-c statement_timeout={int(statement_timeout_ms)}"
     conn = psycopg.connect(
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT"),
@@ -17,6 +26,7 @@ def get_connection(register_pgvector: bool = True, autocommit: bool = True):
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASS"),
         autocommit=autocommit,
+        **kwargs,
     )
     if register_pgvector:
         register_vector(conn)

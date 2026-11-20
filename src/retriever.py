@@ -31,7 +31,12 @@ def retrieve_with_scores(
     embed = embed_fn or embedder.embed_query
     query_vec = embed(query)
 
-    with get_connection() as conn, conn.cursor() as cur:
+    with (
+        get_connection(
+            statement_timeout_ms=int(os.getenv("DB_STATEMENT_TIMEOUT_MS") or 10000)
+        ) as conn,
+        conn.cursor() as cur,
+    ):
         if embedder:
             assert_index_matches(cur, embedder.fingerprint)
         cur.execute(

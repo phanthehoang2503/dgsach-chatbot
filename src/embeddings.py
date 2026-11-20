@@ -19,7 +19,10 @@ class Embedder(Protocol):
 
 class OllamaEmbedder:
     def __init__(self, model: str, dim: int):
-        self.client = ollama.Client(host=os.getenv("OLLAMA_HOST"))
+        self.client = ollama.Client(
+            host=os.getenv("OLLAMA_HOST"),
+            timeout=_parse_float_env("OLLAMA_TIMEOUT", 60.0),
+        )
         self.model = model
         self.dim = dim
         self.fingerprint = f"ollama:{model}:{dim}"
@@ -43,8 +46,14 @@ class OllamaEmbedder:
 class GeminiEmbedder:
     def __init__(self, model: str, dim: int):
         from google import genai  # chỉ cần cài khi dùng Gemini
+        from google.genai import types
 
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self.client = genai.Client(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            http_options=types.HttpOptions(
+                timeout=_parse_int_env("GEMINI_TIMEOUT_MS", 30000)
+            ),
+        )
         self.model = model
         self.dim = dim
         self.fingerprint = f"gemini:{model}:{dim}"
@@ -77,6 +86,16 @@ def _parse_int_env(name: str, default: int) -> int:
         return default
     try:
         return int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
     except ValueError as exc:
         raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
 
