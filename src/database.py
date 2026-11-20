@@ -1,8 +1,9 @@
 import os
+
 import psycopg
-from psycopg import sql
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector
+from psycopg import sql
 
 load_dotenv()
 
@@ -29,27 +30,26 @@ def init_db(
     dim = int(vector_dim)
     table_id = sql.Identifier(table_name)
     index_id = sql.Identifier(f"idx_{table_name}_embedding_hnsw")
-    with get_connection(register_pgvector=False) as conn:
-        with conn.cursor() as cur:
-            # 1: đảm bảo extension vector của postgresql được tạo
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            # 2: tạo / làm mới bảng và index HNSW
-            if drop_old:
-                cur.execute(sql.SQL("DROP TABLE IF EXISTS {};").format(table_id))
-            cur.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {} (
-                      id serial PRIMARY KEY,
-                      content text NOT NULL,
-                      embedding vector({}) NOT NULL
-                    );
-                    """
-                ).format(table_id, sql.Literal(dim))
-            )
-            cur.execute(
-                sql.SQL(
-                    "CREATE INDEX IF NOT EXISTS {} ON {} "
-                    "USING hnsw (embedding vector_cosine_ops);"
-                ).format(index_id, table_id)
-            )
+    with get_connection(register_pgvector=False) as conn, conn.cursor() as cur:
+        # 1: đảm bảo extension vector của postgresql được tạo
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        # 2: tạo / làm mới bảng và index HNSW
+        if drop_old:
+            cur.execute(sql.SQL("DROP TABLE IF EXISTS {};").format(table_id))
+        cur.execute(
+            sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {} (
+                  id serial PRIMARY KEY,
+                  content text NOT NULL,
+                  embedding vector({}) NOT NULL
+                );
+                """
+            ).format(table_id, sql.Literal(dim))
+        )
+        cur.execute(
+            sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {} ON {} "
+                "USING hnsw (embedding vector_cosine_ops);"
+            ).format(index_id, table_id)
+        )

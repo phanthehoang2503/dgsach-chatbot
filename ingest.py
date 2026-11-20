@@ -55,18 +55,17 @@ def ingest_data(file_path: str = DATA_FILE):
     comment_stmt = sql.SQL("COMMENT ON TABLE {} IS {};")
     try:
         embedder = get_embedder()
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                for idx, chunk in enumerate(chunks, 1):
-                    vec = embedder.embed_document(chunk)
-                    cur.execute(insert_stmt, (chunk, vec))
-                    print(f" -> [{idx}/{total}] đã nạp: {chunk[:40]}...")
-                cur.execute(
-                    comment_stmt.format(
-                        sql.Identifier(staging_table),
-                        sql.Literal(embedder.fingerprint),
-                    )
+        with get_connection() as conn, conn.cursor() as cur:
+            for idx, chunk in enumerate(chunks, 1):
+                vec = embedder.embed_document(chunk)
+                cur.execute(insert_stmt, (chunk, vec))
+                print(f" -> [{idx}/{total}] đã nạp: {chunk[:40]}...")
+            cur.execute(
+                comment_stmt.format(
+                    sql.Identifier(staging_table),
+                    sql.Literal(embedder.fingerprint),
                 )
+            )
         print(f"Hoàn tất nạp {total} đoạn vào vector database.")
 
         # commit staging
@@ -76,14 +75,16 @@ def ingest_data(file_path: str = DATA_FILE):
     except Exception as e:
         print(f"Lỗi trong quá trình embedding/nạp: {e}")
         try:
-            with get_connection(register_pgvector=False) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        sql.SQL("DROP TABLE IF EXISTS {};").format(
-                            sql.Identifier(staging_table)
-                        )
+            with (
+                get_connection(register_pgvector=False) as conn,
+                conn.cursor() as cur,
+            ):
+                cur.execute(
+                    sql.SQL("DROP TABLE IF EXISTS {};").format(
+                        sql.Identifier(staging_table)
                     )
-        except Exception as cleanup_err:
+                )
+        except Exception as cleanup_err:  # noqa: BLE001
             print(f"Không thể dọn bảng staging {staging_table}: {cleanup_err}")
         raise
 
@@ -95,14 +96,13 @@ def add_document(text: str, file_path: str = DATA_FILE) -> tuple[int, str]:
     vec = embedder.embed_document(content)
 
     with _doc_write_lock:
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                assert_index_matches(cur, embedder.fingerprint)
-                cur.execute(
-                    "INSERT INTO documents (content, embedding) VALUES (%s, %s) RETURNING id;",
-                    (content, vec),
-                )
-                doc_id = cur.fetchone()[0]
+        with get_connection() as conn, conn.cursor() as cur:
+            assert_index_matches(cur, embedder.fingerprint)
+            cur.execute(
+                "INSERT INTO documents (content, embedding) VALUES (%s, %s) RETURNING id;",
+                (content, vec),
+            )
+            doc_id = cur.fetchone()[0]
 
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(f"\n{content}\n")
@@ -110,13 +110,12 @@ def add_document(text: str, file_path: str = DATA_FILE) -> tuple[int, str]:
 
 
 def list_documents(limit: int = 50, offset: int = 0) -> list[tuple[int, str]]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, content FROM documents ORDER BY id LIMIT %s OFFSET %s;",
-                (limit, offset),
-            )
-            return cur.fetchall()
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, content FROM documents ORDER BY id LIMIT %s OFFSET %s;",
+            (limit, offset),
+        )
+        return cur.fetchall()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from psycopg import errors as pg_errors
 
@@ -18,7 +18,9 @@ def _get_max_distance(default: float = 0.5) -> float:
 
 
 def retrieve_with_scores(
-    query: str, top_k: int = 5, embed_fn: Optional[Callable[[str], list[float]]] = None
+    query: str,
+    top_k: int = 5,
+    embed_fn: Callable[[str], list[float]] | None = None,
 ) -> list[tuple[str, float]]:
     """Trả về các đoạn gần nhất kèm cosine distance."""
     if top_k <= 0:
@@ -28,25 +30,26 @@ def retrieve_with_scores(
     embed = embed_fn or embedder.embed_query
     query_vec = embed(query)
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            if embedder:
-                assert_index_matches(cur, embedder.fingerprint)
-            cur.execute(
-                """
-                    SELECT content, embedding <=> %s::vector AS distance
-                    FROM documents
-                    WHERE embedding IS NOT NULL
-                    ORDER BY distance ASC
-                    LIMIT %s;
-                """,
-                (query_vec, top_k),
-            )
-            return cur.fetchall()
+    with get_connection() as conn, conn.cursor() as cur:
+        if embedder:
+            assert_index_matches(cur, embedder.fingerprint)
+        cur.execute(
+            """
+                SELECT content, embedding <=> %s::vector AS distance
+                FROM documents
+                WHERE embedding IS NOT NULL
+                ORDER BY distance ASC
+                LIMIT %s;
+            """,
+            (query_vec, top_k),
+        )
+        return cur.fetchall()
 
 
 def retrieve_ctx(
-    query: str, top_k: int = 5, embed_fn: Optional[Callable[[str], list[float]]] = None
+    query: str,
+    top_k: int = 5,
+    embed_fn: Callable[[str], list[float]] | None = None,
 ) -> list[str]:
     max_distance = _get_max_distance()
     rows = retrieve_with_scores(query, top_k, embed_fn)
