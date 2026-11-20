@@ -12,7 +12,9 @@ def test_swap_table_reuses_connection_and_renames_index_and_sequence():
     with patch("src.migration.get_connection", return_value=mock_conn) as mock_get_conn:
         swap_table(staging_table="documents_staging_abc", target_table="documents")
 
-    mock_get_conn.assert_called_once_with(autocommit=False, register_pgvector=False)
+    mock_get_conn.assert_called_once_with(
+        autocommit=False, register_pgvector=False, role="ingest"
+    )
     executed = [
         call.args[0].as_string(None)
         if hasattr(call.args[0], "as_string")

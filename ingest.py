@@ -55,7 +55,7 @@ def ingest_data(file_path: str = DATA_FILE):
     comment_stmt = sql.SQL("COMMENT ON TABLE {} IS {};")
     try:
         embedder = get_embedder()
-        with get_connection() as conn, conn.cursor() as cur:
+        with get_connection(role="ingest") as conn, conn.cursor() as cur:
             for idx, chunk in enumerate(chunks, 1):
                 vec = embedder.embed_document(chunk)
                 cur.execute(insert_stmt, (chunk, vec))
@@ -76,7 +76,7 @@ def ingest_data(file_path: str = DATA_FILE):
         print(f"Lỗi trong quá trình embedding/nạp: {e}")
         try:
             with (
-                get_connection(register_pgvector=False) as conn,
+                get_connection(register_pgvector=False, role="ingest") as conn,
                 conn.cursor() as cur,
             ):
                 cur.execute(

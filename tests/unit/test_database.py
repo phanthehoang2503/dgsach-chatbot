@@ -43,6 +43,34 @@ def test_get_connection_passes_timeouts(monkeypatch):
     assert kwargs["options"] == "-c statement_timeout=2500"
 
 
+def test_get_connection_uses_ingest_role_and_falls_back_to_db_env(monkeypatch):
+    monkeypatch.setenv("DB_USER", "bookstreet_app")
+    monkeypatch.setenv("DB_PASS", "app_secret")
+    monkeypatch.setenv("INGEST_DB_USER", "bookstreet_ingest")
+    monkeypatch.setenv("INGEST_DB_PASS", "ingest_secret")
+
+    mock_conn = MagicMock()
+    with (
+        patch("src.database.psycopg.connect", return_value=mock_conn) as mock_connect,
+        patch("src.database.register_vector"),
+    ):
+        get_connection(role="ingest")
+
+    assert mock_connect.call_args.kwargs["user"] == "bookstreet_ingest"
+    assert mock_connect.call_args.kwargs["password"] == "ingest_secret"
+
+    monkeypatch.delenv("INGEST_DB_USER")
+    monkeypatch.delenv("INGEST_DB_PASS")
+    with (
+        patch("src.database.psycopg.connect", return_value=mock_conn) as mock_connect,
+        patch("src.database.register_vector"),
+    ):
+        get_connection(role="ingest")
+
+    assert mock_connect.call_args.kwargs["user"] == "bookstreet_app"
+    assert mock_connect.call_args.kwargs["password"] == "app_secret"
+
+
 def test_init_db_uses_single_connection_and_creates_not_null_table_and_hnsw_index():
     mock_cur = MagicMock()
     mock_conn = MagicMock()
@@ -52,7 +80,7 @@ def test_init_db_uses_single_connection_and_creates_not_null_table_and_hnsw_inde
     with patch("src.database.get_connection", return_value=mock_conn) as mock_get_conn:
         init_db(vector_dim=768, drop_old=True, table_name="documents")
 
-    mock_get_conn.assert_called_once_with(register_pgvector=False)
+    mock_get_conn.assert_called_once_with(register_pgvector=False, role="ingest")
     executed = [
         call.args[0].as_string(None)
         if hasattr(call.args[0], "as_string")
