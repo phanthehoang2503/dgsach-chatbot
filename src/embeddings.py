@@ -19,10 +19,17 @@ class OllamaEmbedder:
     def __init__(self, model: str, dim: int):
         self.client = ollama.Client(host=os.getenv("OLLAMA_HOST"))
         self.model = model
+        self.dim = dim
         self.fingerprint = f"ollama:{model}:{dim}"
 
     def _embed(self, text: str) -> list[float]:
-        return self.client.embeddings(model=self.model, prompt=text)["embedding"]
+        embedding = self.client.embeddings(model=self.model, prompt=text)["embedding"]
+        if len(embedding) != self.dim:
+            raise ValueError(
+                f"Ollama embedding dimension mismatch for model '{self.model}': "
+                f"expected {self.dim}, got {len(embedding)}"
+            )
+        return embedding
 
     def embed_document(self, text: str) -> list[float]:
         return self._embed(text)
@@ -62,14 +69,35 @@ class GeminiEmbedder:
 PROVIDERS = {"ollama": OllamaEmbedder, "gemini": GeminiEmbedder}
 
 
+def _parse_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} không hợp lệ: {raw!r}") from exc
+
+
 @lru_cache
 def get_embedder() -> Embedder:
-    provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
+    raw_provider = os.getenv("EMBEDDING_PROVIDER")
+    provider = (
+        raw_provider.strip().lower()
+        if raw_provider and raw_provider.strip()
+        else "ollama"
+    )
     if provider not in PROVIDERS:
         raise ValueError(f"EMBEDDING_PROVIDER không hợp lệ: {provider}")
+    raw_model = os.getenv("EMBEDDING_MODEL")
+    model = (
+        raw_model.strip()
+        if raw_model and raw_model.strip()
+        else "qwen3-embedding:0.6b"
+    )
     return PROVIDERS[provider](
-        model=os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b"),
-        dim=int(os.getenv("VECTOR_DIM", "1024")),
+        model=model,
+        dim=_parse_int_env("VECTOR_DIM", 1024),
     )
 
 

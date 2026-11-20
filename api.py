@@ -3,12 +3,15 @@ import os
 import secrets
 from typing import Annotated
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field, StringConstraints
 
 from ingest import add_document, list_documents
 from src.llm import generate_answer
 from src.retriever import retrieve_ctx
+
+load_dotenv()
 
 logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="BookStreet RAG API", version="1.1.0")
@@ -44,9 +47,12 @@ class DocumentRes(BaseModel):
 
 def require_admin(x_api_key: str = Header(default="")):
     expected = os.getenv("ADMIN_API_KEY")
-    if not expected or not secrets.compare_digest(
-        x_api_key.encode(), expected.encode()
-    ):
+    if not expected:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Admin API key is not configured",
+        )
+    if not secrets.compare_digest(x_api_key.encode(), expected.encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key không hợp lệ")
 
 

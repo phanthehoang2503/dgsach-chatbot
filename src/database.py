@@ -42,8 +42,8 @@ def init_db(
                     """
                     CREATE TABLE IF NOT EXISTS {} (
                       id serial PRIMARY KEY,
-                      content text,
-                      embedding vector({})
+                      content text NOT NULL,
+                      embedding vector({}) NOT NULL
                     );
                     """
                 ).format(table_id, sql.Literal(dim))
