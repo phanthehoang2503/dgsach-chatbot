@@ -85,9 +85,11 @@ def _handle_endpoint_errors(unexpected_msg: str):
 @app.get("/health")
 def health_check():
     try:
-        with get_connection(register_pgvector=False) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1;")
+        with (
+            get_connection(register_pgvector=False) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute("SELECT 1;")
         return {"status": "ok"}
     except Exception as exc:
         logger.exception("Database readiness check failed")

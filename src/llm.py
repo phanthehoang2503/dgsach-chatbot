@@ -1,6 +1,5 @@
 import os
 import re
-from typing import Optional
 
 import ollama
 from dotenv import load_dotenv
@@ -81,7 +80,7 @@ SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.
 
 
 def generate_answer(
-    query: str, context: list[str], model: Optional[str] = None
+    query: str, context: list[str], model: str | None = None
 ) -> str:
     """Ghép ngữ cảnh với câu hỏi và gọi LLM trả về câu trả lời."""
     if not context:
