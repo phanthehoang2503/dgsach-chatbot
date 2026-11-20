@@ -57,7 +57,17 @@ def retrieve_ctx(
     ]
 
 
+_verified_fingerprints: set[str] = set()
+
+
+def reset_index_check_cache() -> None:
+    """Xóa cache kiểm tra fingerprint của bảng documents."""
+    _verified_fingerprints.clear()
+
+
 def assert_index_matches(cur, expected: str):
+    if expected in _verified_fingerprints:
+        return
     try:
         cur.execute("SELECT obj_description('documents'::regclass, 'pg_class');")
         row = cur.fetchone()
@@ -72,3 +82,4 @@ def assert_index_matches(cur, expected: str):
             f"Bảng documents dùng '{stored}', cấu hình hiện tại là '{expected}'. "
             "Hãy chạy lại ingest.py."
         )
+    _verified_fingerprints.add(expected)

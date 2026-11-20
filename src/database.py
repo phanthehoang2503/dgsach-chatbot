@@ -7,7 +7,7 @@ from pgvector.psycopg import register_vector
 load_dotenv()
 
 
-def get_connection(register_pgvector: bool = True):
+def get_connection(register_pgvector: bool = True, autocommit: bool = True):
     """Tạo và cấu hình kết nối tới PostgreSQL/pgvector."""
     conn = psycopg.connect(
         host=os.getenv("DB_HOST"),
@@ -15,7 +15,7 @@ def get_connection(register_pgvector: bool = True):
         dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASS"),
-        autocommit=True,
+        autocommit=autocommit,
     )
     if register_pgvector:
         register_vector(conn)
@@ -28,13 +28,12 @@ def init_db(
     """Tạo bảng documents nếu chưa tồn tại"""
     dim = int(vector_dim)
     table_id = sql.Identifier(table_name)
-    # 1: đảm bảo extension vector của postgresql được tạo
+    index_id = sql.Identifier(f"idx_{table_name}_embedding_hnsw")
     with get_connection(register_pgvector=False) as conn:
         with conn.cursor() as cur:
+            # 1: đảm bảo extension vector của postgresql được tạo
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-    # 2: tạo / làm mới bảng
-    with get_connection(register_pgvector=True) as conn:
-        with conn.cursor() as cur:
+            # 2: tạo / làm mới bảng và index HNSW
             if drop_old:
                 cur.execute(sql.SQL("DROP TABLE IF EXISTS {};").format(table_id))
             cur.execute(
@@ -47,4 +46,10 @@ def init_db(
                     );
                     """
                 ).format(table_id, sql.Literal(dim))
+            )
+            cur.execute(
+                sql.SQL(
+                    "CREATE INDEX IF NOT EXISTS {} ON {} "
+                    "USING hnsw (embedding vector_cosine_ops);"
+                ).format(index_id, table_id)
             )
