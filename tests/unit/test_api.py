@@ -1,10 +1,18 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+import ollama
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from api import app
+from src.errors import (
+    ConfigError,
+    IndexNotReadyError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
 
 client = TestClient(app)
 
@@ -68,9 +76,15 @@ def test_create_and_list_documents_with_valid_admin_key(monkeypatch):
 @pytest.mark.parametrize(
     ("exc", "expected_status"),
     [
-        (ValueError("bad input"), 400),
-        (RuntimeError("index mismatch"), 409),
+        (InvalidInputError("bad input"), 400),
+        (IndexNotReadyError("index mismatch"), 503),
+        (ConfigError("bad config"), 500),
+        (ValueError("generic value error"), 500),
+        (RuntimeError("generic runtime error"), 500),
+        (httpx.ConnectError("ollama down"), 503),
+        (ollama.ResponseError("model error"), 503),
         (psycopg.OperationalError("db down"), 503),
+        (UpstreamUnavailableError("llm overloaded"), 503),
         (ZeroDivisionError("unexpected"), 500),
     ],
 )
@@ -79,3 +93,15 @@ def test_chat_endpoint_maps_errors(exc, expected_status):
         res = client.post("/api/v1/chat", json={"query": "Có sách gì?", "top_k": 3})
 
     assert res.status_code == expected_status
+
+
+def test_chat_endpoint_does_not_leak_internal_details():
+    err = IndexNotReadyError(
+        "Bảng documents dùng 'ollama:qwen3-embedding:0.6b:1024', cấu hình hiện tại là 'gemini:..."
+    )
+    with patch("api.retrieve_ctx", side_effect=err):
+        res = client.post("/api/v1/chat", json={"query": "Có sách gì?", "top_k": 3})
+
+    assert res.status_code == 503
+    assert "ollama" not in res.text
+    assert "1024" not in res.text

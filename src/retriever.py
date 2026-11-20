@@ -5,6 +5,7 @@ from psycopg import errors as pg_errors
 
 from src.database import get_connection
 from src.embeddings import get_embedder
+from src.errors import ConfigError, IndexNotReadyError, InvalidInputError
 
 
 def _get_max_distance(default: float = 0.5) -> float:
@@ -14,7 +15,7 @@ def _get_max_distance(default: float = 0.5) -> float:
     try:
         return float(raw)
     except ValueError as exc:
-        raise ValueError(f"MAX_DISTANCE không hợp lệ: {raw!r}") from exc
+        raise ConfigError(f"MAX_DISTANCE không hợp lệ: {raw!r}") from exc
 
 
 def retrieve_with_scores(
@@ -24,7 +25,7 @@ def retrieve_with_scores(
 ) -> list[tuple[str, float]]:
     """Trả về các đoạn gần nhất kèm cosine distance."""
     if top_k <= 0:
-        raise ValueError(f"top_k phải lớn hơn 0, nhận được: {top_k}")
+        raise InvalidInputError(f"top_k phải lớn hơn 0, nhận được: {top_k}")
 
     embedder = None if embed_fn else get_embedder()
     embed = embed_fn or embedder.embed_query
@@ -75,13 +76,13 @@ def assert_index_matches(cur, expected: str):
         cur.execute("SELECT obj_description('documents'::regclass, 'pg_class');")
         row = cur.fetchone()
     except pg_errors.UndefinedTable as exc:
-        raise RuntimeError(
+        raise IndexNotReadyError(
             "Bảng 'documents' chưa tồn tại trong database. "
             "Hãy chạy `ingest.py` để tạo bảng và nạp dữ liệu."
         ) from exc
     stored = row[0] if row else None
     if stored != expected:
-        raise RuntimeError(
+        raise IndexNotReadyError(
             f"Bảng documents dùng '{stored}', cấu hình hiện tại là '{expected}'. "
             "Hãy chạy lại ingest.py."
         )

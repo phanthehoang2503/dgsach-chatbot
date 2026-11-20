@@ -5,6 +5,8 @@ from typing import Protocol
 import ollama
 from dotenv import load_dotenv
 
+from src.errors import ConfigError
+
 load_dotenv()
 
 
@@ -25,7 +27,7 @@ class OllamaEmbedder:
     def _embed(self, text: str) -> list[float]:
         embedding = self.client.embeddings(model=self.model, prompt=text)["embedding"]
         if len(embedding) != self.dim:
-            raise ValueError(
+            raise ConfigError(
                 f"Ollama embedding dimension mismatch for model '{self.model}': "
                 f"expected {self.dim}, got {len(embedding)}"
             )
@@ -76,7 +78,7 @@ def _parse_int_env(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} không hợp lệ: {raw!r}") from exc
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
 
 
 @lru_cache
@@ -88,12 +90,10 @@ def get_embedder() -> Embedder:
         else "ollama"
     )
     if provider not in PROVIDERS:
-        raise ValueError(f"EMBEDDING_PROVIDER không hợp lệ: {provider}")
+        raise ConfigError(f"EMBEDDING_PROVIDER không hợp lệ: {provider}")
     raw_model = os.getenv("EMBEDDING_MODEL")
     model = (
-        raw_model.strip()
-        if raw_model and raw_model.strip()
-        else "qwen3-embedding:0.6b"
+        raw_model.strip() if raw_model and raw_model.strip() else "qwen3-embedding:0.6b"
     )
     return PROVIDERS[provider](
         model=model,

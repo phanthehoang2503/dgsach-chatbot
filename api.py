@@ -4,6 +4,8 @@ import secrets
 from contextlib import contextmanager
 from typing import Annotated
 
+import httpx
+import ollama
 import psycopg
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
@@ -11,6 +13,11 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from ingest import add_document, list_documents
 from src.database import get_connection
+from src.errors import (
+    IndexNotReadyError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
 from src.llm import generate_answer
 from src.retriever import retrieve_ctx
 
@@ -59,17 +66,32 @@ def require_admin(x_api_key: str = Header(default="")):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key không hợp lệ")
 
 
+UPSTREAM_ERRORS = (
+    psycopg.Error,
+    httpx.HTTPError,
+    ollama.ResponseError,
+    ConnectionError,
+    TimeoutError,
+    UpstreamUnavailableError,
+)
+
+
 @contextmanager
 def _handle_endpoint_errors(unexpected_msg: str):
     try:
         yield
     except HTTPException:
         raise
-    except ValueError as exc:
+    except InvalidInputError as exc:
+        logger.info("Invalid input: %s", exc)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    except (psycopg.Error, ConnectionError, TimeoutError) as exc:
+    except IndexNotReadyError as exc:
+        logger.exception("Index not ready")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Hệ thống đang cập nhật dữ liệu, vui lòng thử lại sau",
+        ) from exc
+    except UPSTREAM_ERRORS as exc:
         logger.exception(unexpected_msg)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

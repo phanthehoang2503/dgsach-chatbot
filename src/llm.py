@@ -4,6 +4,8 @@ import re
 import ollama
 from dotenv import load_dotenv
 
+from src.errors import ConfigError
+
 load_dotenv()
 
 
@@ -66,7 +68,7 @@ def _parse_float_env(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} không hợp lệ: {raw!r}") from exc
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
 
 
 SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.
@@ -79,9 +81,7 @@ SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.
 5. Max 3 sentences (or a short list). No preamble, no headings."""
 
 
-def generate_answer(
-    query: str, context: list[str], model: str | None = None
-) -> str:
+def generate_answer(query: str, context: list[str], model: str | None = None) -> str:
     """Ghép ngữ cảnh với câu hỏi và gọi LLM trả về câu trả lời."""
     if not context:
         if _is_vietnamese(query):
