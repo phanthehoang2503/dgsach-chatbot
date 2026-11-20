@@ -10,7 +10,9 @@ def swap_table(
     staging_id = sql.Identifier(staging_table)
     old_id = sql.Identifier(f"{target_table}_old")
 
-    with get_connection(autocommit=False, register_pgvector=False) as conn:
+    with get_connection(
+        autocommit=False, register_pgvector=False, role="ingest"
+    ) as conn:
         with conn.cursor() as cur:
             cur.execute(sql.SQL("DROP TABLE IF EXISTS {};").format(old_id))
             cur.execute(

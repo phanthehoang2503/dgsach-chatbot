@@ -55,7 +55,7 @@ def ingest_data(file_path: str = DATA_FILE):
     comment_stmt = sql.SQL("COMMENT ON TABLE {} IS {};")
     try:
         embedder = get_embedder()
-        with get_connection() as conn, conn.cursor() as cur:
+        with get_connection(role="ingest") as conn, conn.cursor() as cur:
             for idx, chunk in enumerate(chunks, 1):
                 vec = embedder.embed_document(chunk)
                 cur.execute(insert_stmt, (chunk, vec))
@@ -76,7 +76,7 @@ def ingest_data(file_path: str = DATA_FILE):
         print(f"Lỗi trong quá trình embedding/nạp: {e}")
         try:
             with (
-                get_connection(register_pgvector=False) as conn,
+                get_connection(register_pgvector=False, role="ingest") as conn,
                 conn.cursor() as cur,
             ):
                 cur.execute(
@@ -96,7 +96,12 @@ def add_document(text: str, file_path: str = DATA_FILE) -> tuple[int, str]:
     vec = embedder.embed_document(content)
 
     with _doc_write_lock:
-        with get_connection() as conn, conn.cursor() as cur:
+        with (
+            get_connection(
+                statement_timeout_ms=int(os.getenv("DB_STATEMENT_TIMEOUT_MS") or 10000)
+            ) as conn,
+            conn.cursor() as cur,
+        ):
             assert_index_matches(cur, embedder.fingerprint)
             cur.execute(
                 "INSERT INTO documents (content, embedding) VALUES (%s, %s) RETURNING id;",
@@ -110,7 +115,12 @@ def add_document(text: str, file_path: str = DATA_FILE) -> tuple[int, str]:
 
 
 def list_documents(limit: int = 50, offset: int = 0) -> list[tuple[int, str]]:
-    with get_connection() as conn, conn.cursor() as cur:
+    with (
+        get_connection(
+            statement_timeout_ms=int(os.getenv("DB_STATEMENT_TIMEOUT_MS") or 10000)
+        ) as conn,
+        conn.cursor() as cur,
+    ):
         cur.execute(
             "SELECT id, content FROM documents ORDER BY id LIMIT %s OFFSET %s;",
             (limit, offset),

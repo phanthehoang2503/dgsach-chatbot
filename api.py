@@ -4,13 +4,24 @@ import secrets
 from contextlib import contextmanager
 from typing import Annotated
 
+import httpx
+import ollama
 import psycopg
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from ingest import add_document, list_documents
 from src.database import get_connection
+from src.errors import (
+    IndexNotReadyError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
 from src.llm import generate_answer
 from src.retriever import retrieve_ctx
 
@@ -18,6 +29,29 @@ load_dotenv()
 
 logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="BookStreet RAG API", version="1.1.0")
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+MAX_BODY_BYTES = 16 * 1024
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body quá lớn"},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Content-Length không hợp lệ"},
+            )
+    return await call_next(request)
 
 
 QueryText = Annotated[
@@ -59,17 +93,32 @@ def require_admin(x_api_key: str = Header(default="")):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key không hợp lệ")
 
 
+UPSTREAM_ERRORS = (
+    psycopg.Error,
+    httpx.HTTPError,
+    ollama.ResponseError,
+    ConnectionError,
+    TimeoutError,
+    UpstreamUnavailableError,
+)
+
+
 @contextmanager
 def _handle_endpoint_errors(unexpected_msg: str):
     try:
         yield
     except HTTPException:
         raise
-    except ValueError as exc:
+    except InvalidInputError as exc:
+        logger.info("Invalid input: %s", exc)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    except (psycopg.Error, ConnectionError, TimeoutError) as exc:
+    except IndexNotReadyError as exc:
+        logger.exception("Index not ready")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Hệ thống đang cập nhật dữ liệu, vui lòng thử lại sau",
+        ) from exc
+    except UPSTREAM_ERRORS as exc:
         logger.exception(unexpected_msg)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -86,7 +135,10 @@ def _handle_endpoint_errors(unexpected_msg: str):
 def health_check():
     try:
         with (
-            get_connection(register_pgvector=False) as conn,
+            get_connection(
+                register_pgvector=False,
+                statement_timeout_ms=int(os.getenv("DB_STATEMENT_TIMEOUT_MS") or 10000),
+            ) as conn,
             conn.cursor() as cur,
         ):
             cur.execute("SELECT 1;")
@@ -99,7 +151,8 @@ def health_check():
 
 
 @app.post("/api/v1/chat", response_model=ChatRes)
-def chat_endpoint(req: ChatReq):
+@limiter.limit(lambda: os.getenv("CHAT_RATE_LIMIT") or "10/minute")
+def chat_endpoint(request: Request, req: ChatReq):
     with _handle_endpoint_errors("Không thể xử lý câu hỏi"):
         sources = retrieve_ctx(req.query, top_k=req.top_k)
         answer = generate_answer(req.query, sources)

@@ -5,7 +5,9 @@ from typing import Protocol
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+from src.errors import ConfigError
+
+load_dotenv()
 
 
 class Embedder(Protocol):
@@ -17,7 +19,10 @@ class Embedder(Protocol):
 
 class OllamaEmbedder:
     def __init__(self, model: str, dim: int):
-        self.client = ollama.Client(host=os.getenv("OLLAMA_HOST"))
+        self.client = ollama.Client(
+            host=os.getenv("OLLAMA_HOST"),
+            timeout=_parse_float_env("OLLAMA_TIMEOUT", 60.0),
+        )
         self.model = model
         self.dim = dim
         self.fingerprint = f"ollama:{model}:{dim}"
@@ -25,7 +30,7 @@ class OllamaEmbedder:
     def _embed(self, text: str) -> list[float]:
         embedding = self.client.embeddings(model=self.model, prompt=text)["embedding"]
         if len(embedding) != self.dim:
-            raise ValueError(
+            raise ConfigError(
                 f"Ollama embedding dimension mismatch for model '{self.model}': "
                 f"expected {self.dim}, got {len(embedding)}"
             )
@@ -41,8 +46,14 @@ class OllamaEmbedder:
 class GeminiEmbedder:
     def __init__(self, model: str, dim: int):
         from google import genai  # chỉ cần cài khi dùng Gemini
+        from google.genai import types
 
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self.client = genai.Client(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            http_options=types.HttpOptions(
+                timeout=_parse_int_env("GEMINI_TIMEOUT_MS", 30000)
+            ),
+        )
         self.model = model
         self.dim = dim
         self.fingerprint = f"gemini:{model}:{dim}"
@@ -76,7 +87,17 @@ def _parse_int_env(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} không hợp lệ: {raw!r}") from exc
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
 
 
 @lru_cache
@@ -88,12 +109,10 @@ def get_embedder() -> Embedder:
         else "ollama"
     )
     if provider not in PROVIDERS:
-        raise ValueError(f"EMBEDDING_PROVIDER không hợp lệ: {provider}")
+        raise ConfigError(f"EMBEDDING_PROVIDER không hợp lệ: {provider}")
     raw_model = os.getenv("EMBEDDING_MODEL")
     model = (
-        raw_model.strip()
-        if raw_model and raw_model.strip()
-        else "qwen3-embedding:0.6b"
+        raw_model.strip() if raw_model and raw_model.strip() else "qwen3-embedding:0.6b"
     )
     return PROVIDERS[provider](
         model=model,

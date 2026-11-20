@@ -79,8 +79,11 @@ cp .env.example .env
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5434` | PostgreSQL port |
 | `DB_NAME` | `vectordb` | Target database name |
-| `DB_USER` | `postgres` | Database user |
-| `DB_PASS` | — | Database password |
+| `DB_SUPERUSER_PASS` | — | Postgres superuser password (used by Docker Compose) |
+| `DB_USER` | `bookstreet_app` | Least-privilege database user for API / CLI chat |
+| `DB_PASS` | — | Password for `DB_USER` |
+| `INGEST_DB_USER` | `bookstreet_ingest` | Database user for `ingest.py` / `evaluate.py` |
+| `INGEST_DB_PASS` | — | Password for `INGEST_DB_USER` (falls back to `DB_PASS` if unset) |
 | `TEST_DB_NAME` | — | Optional dedicated test database name (must contain `test`) |
 | `ALLOW_DESTRUCTIVE_TESTS` | `false` | Set `true` or `1` to bypass test DB name check |
 | `MAX_DISTANCE` | `0.5` | Maximum cosine distance threshold for retrieved chunks |
@@ -92,6 +95,12 @@ cp .env.example .env
 | `LLM_TEMPERATURE` | `0.2` | Sampling temperature for LLM |
 | `GEMINI_API_KEY` | — | Google Gemini API key (required when `EMBEDDING_PROVIDER=gemini`) |
 | `ADMIN_API_KEY` | — | Secret key for `x-api-key` header on `/api/v1/documents` |
+| `OLLAMA_TIMEOUT` | `60` | Ollama request timeout in seconds (chat and embeddings) |
+| `GEMINI_TIMEOUT_MS` | `30000` | Gemini HTTP timeout in milliseconds |
+| `DB_CONNECT_TIMEOUT` | `5` | PostgreSQL connection timeout in seconds |
+| `DB_STATEMENT_TIMEOUT_MS` | `10000` | PostgreSQL statement timeout in ms for API queries |
+| `CHAT_RATE_LIMIT` | `10/minute` | Rate limit per IP on `POST /api/v1/chat` |
+| `LLM_MAX_CONCURRENCY` | `4` | Maximum concurrent LLM calls |
 
 ### 3. Start PostgreSQL & pgvector
 
@@ -103,8 +112,15 @@ docker compose up -d
 ```
 
 This starts:
-- **PostgreSQL 16 + pgvector** on `localhost:5434`
-- **Adminer** (web DB UI) on `http://localhost:8080`
+- **PostgreSQL 16 + pgvector** on `127.0.0.1:5434`
+- **Adminer** (web DB UI) only when started with `--profile debug` (`docker compose --profile debug up -d`) on `http://127.0.0.1:8080`
+
+Create the least-privilege database roles (`bookstreet_ingest` and `bookstreet_app`) once using superuser:
+
+```bash
+docker exec -i pgvector-db psql -U postgres -d vectordb \
+  -v ingest_pass=your_ingest_password -v app_pass=your_app_password < db/roles.sql
+```
 
 ### 4. Pull Ollama Models (if using Ollama)
 

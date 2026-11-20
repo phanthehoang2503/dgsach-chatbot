@@ -1,14 +1,25 @@
 import os
 import re
+import threading
+from functools import lru_cache
 
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+from src.errors import ConfigError, UpstreamUnavailableError
+
+load_dotenv()
 
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST")
-ollama_client = ollama.Client(host=OLLAMA_HOST)
+@lru_cache
+def get_ollama_client() -> ollama.Client:
+    return ollama.Client(
+        host=os.getenv("OLLAMA_HOST"),
+        timeout=_parse_float_env("OLLAMA_TIMEOUT", 60.0),
+    )
+
+
+_llm_slots = threading.BoundedSemaphore(int(os.getenv("LLM_MAX_CONCURRENCY") or 4))
 
 _VI_DIACRITICS_RE = re.compile(
     r"[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]",
@@ -66,7 +77,7 @@ def _parse_float_env(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} không hợp lệ: {raw!r}") from exc
+        raise ConfigError(f"{name} không hợp lệ: {raw!r}") from exc
 
 
 SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.
@@ -79,9 +90,7 @@ SYSTEM_PROMPT = """You are a professional bookstreet AI Assistant.
 5. Max 3 sentences (or a short list). No preamble, no headings."""
 
 
-def generate_answer(
-    query: str, context: list[str], model: str | None = None
-) -> str:
+def generate_answer(query: str, context: list[str], model: str | None = None) -> str:
     """Ghép ngữ cảnh với câu hỏi và gọi LLM trả về câu trả lời."""
     if not context:
         if _is_vietnamese(query):
@@ -98,12 +107,17 @@ def generate_answer(
     user_message = (
         f"<context>\n{context_text}\n</context>\n\n<question>\n{query}\n</question>"
     )
-    res = ollama_client.chat(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        options={"temperature": temperature},  # càng cao càng halu
-    )
+    if not _llm_slots.acquire(timeout=5):
+        raise UpstreamUnavailableError("LLM đang quá tải")
+    try:
+        res = get_ollama_client().chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            options={"temperature": temperature},  # càng cao càng halu
+        )
+    finally:
+        _llm_slots.release()
     return res["message"]["content"]
