@@ -1,6 +1,7 @@
 import sys
-from src.retriever import retrieve_ctx
+
 from src.llm import generate_answer
+from src.retriever import retrieve_ctx
 
 
 def main():
@@ -27,10 +28,10 @@ def main():
             ans = generate_answer(query, ctx)
 
             print(f"Chat bot: \n{ans}")
-        except KeyboardInterrupt:
-            print(f"\n Bái bai")
+        except (KeyboardInterrupt, EOFError):
+            print("\n Bái bai")
             sys.exit(0)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Đã xảy ra lỗi: {e}")
 
 
