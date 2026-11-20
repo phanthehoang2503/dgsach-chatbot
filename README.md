@@ -1,194 +1,196 @@
 # BookStreet RAG Chatbot
 
-A Retrieval-Augmented Generation (RAG) chatbot for querying information about books and activities at Ho Chi Minh City's Book Street (Đường Sách TP.HCM).
+A Retrieval-Augmented Generation (RAG) chatbot and REST API for querying information about **Đường Sách (Book Street)** and its book catalog, built with **FastAPI**, **PostgreSQL (`pgvector`)**, and **Ollama / Google Gemini**.
 
-The system runs entirely on local infrastructure using Ollama for LLM inference and PostgreSQL with pgvector for vector storage - Might implements factory method for switching between AI providers on the feature.
----
+## Features
+
+- **Vector Search with `pgvector`**: Cosine similarity search (`<=>`) with HNSW/vector indexing and configurable `MAX_DISTANCE` threshold filtering.
+- **Pluggable Embeddings**: Supports local embeddings via **Ollama** (`qwen3-embedding:0.6b` by default) or cloud embeddings via **Google Gemini**, with embedding fingerprint validation to prevent index/model mismatches.
+- **Zero-Downtime Data Ingestion**: Stages embeddings in a temporary table and atomically swaps into `documents` (`src/migration.py`).
+- **Multiple Interfaces**:
+  - **REST API** (`api.py`) built with FastAPI, including health check, chat endpoint, and API-key-protected document management.
+  - **Interactive CLI** (`main.py`) for local terminal Q&A.
+  - **Evaluation Suite** (`evaluate.py`) for retrieval hit-rate and answer quality benchmarking.
+- **Safe Integration Testing**: Built-in guardrails (`tests/conftest.py`) to prevent accidental destruction of non-test databases.
 
 ## Tech Stack
 
-| Component | Technology | Details |
-| :--- | :--- | :--- |
-| LLM | [Ollama](https://ollama.com/) | `qwen3:4b` |
-| Embedding | [Ollama](https://ollama.com/) | `qwen3-embedding:0.6b` (1024-dim) |
-| Vector DB | [PostgreSQL 16](https://www.postgresql.org/) + [pgvector](https://github.com/pgvector/pgvector) | Cosine distance (`<=>`) |
-| API | [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/) | Auto-generated Swagger UI at `/docs` |
-| DB Admin | [Adminer](https://www.adminer.org/) | Web UI on port 8080 |
+- **Language**: Python >= 3.11
+- **Package Manager**: [uv](https://docs.astral.sh/uv/)
+- **Web Framework**: FastAPI + Uvicorn
+- **Database**: PostgreSQL 16 + `pgvector` (`psycopg` v3)
+- **LLM & Embeddings**: Ollama, Google GenAI SDK (`google-genai`)
+- **Testing & Linting**: `pytest`, `httpx`, `ruff`
 
----
+## Project Structure
 
-## Setup
-
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
-- Docker & Docker Compose
-- [Ollama](https://ollama.com/download)
-
-### 1. Clone & pull models
-
-```bash
-git clone https://github.com/phanthehoang2503/dgsach-chatbot.git
-cd dgsach-chatbot
-
-ollama pull qwen3-embedding:0.6b
-ollama pull qwen3:4b (for lower end pc testing purpose)
+```text
+.
+├── api.py                        # FastAPI application & endpoints
+├── main.py                       # Interactive CLI chatbot
+├── ingest.py                     # Data ingestion & document management
+├── evaluate.py                   # Retrieval & answer evaluation script
+├── init.sql                      # PostgreSQL pgvector extension init script
+├── docker-compose.example.yml    # Example Docker Compose (pgvector + Adminer)
+├── .env.example                  # Environment variable template
+├── pyproject.toml                # Project metadata & dependencies
+├── data/
+│   └── data.txt                  # Source knowledge base (one document per line)
+├── src/
+│   ├── database.py               # DB connection & schema initialization
+│   ├── embeddings.py             # Ollama & Gemini embedder implementations
+│   ├── llm.py                    # Prompting & LLM answer generation
+│   ├── migration.py              # Atomic staging-to-production table swap
+│   └── retriever.py              # Vector search & fingerprint verification
+└── tests/
+    ├── conftest.py               # Test database safety checks
+    ├── unit/                     # Unit tests (mocked DB/AI providers)
+    ├── integration/              # Integration tests (requires test DB)
+    └── e2e/                      # End-to-end tests
 ```
 
-### 2. Configure environment
+## Prerequisites
+
+- **Python** `>= 3.11`
+- **uv** (`pip install uv` or via official installer)
+- **Docker & Docker Compose** (for PostgreSQL + `pgvector`)
+- **Ollama** (running locally, if using local LLM/embeddings) and/or a **Gemini API key**
+
+## Getting Started
+
+### 1. Clone & Install Dependencies
+
+```bash
+git clone <repository-url>
+cd AIC_prj_1
+uv sync
+```
+
+### 2. Configure Environment Variables
+
+Copy the example environment file and update the values:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` as needed:
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5434` | PostgreSQL port |
+| `DB_NAME` | `vectordb` | Target database name |
+| `DB_USER` | `postgres` | Database user |
+| `DB_PASS` | — | Database password |
+| `TEST_DB_NAME` | — | Optional dedicated test database name (must contain `test`) |
+| `ALLOW_DESTRUCTIVE_TESTS` | `false` | Set `true` or `1` to bypass test DB name check |
+| `MAX_DISTANCE` | `0.5` | Maximum cosine distance threshold for retrieved chunks |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama server URL |
+| `EMBEDDING_PROVIDER` | `ollama` | Embedding provider (`ollama` or `gemini`) |
+| `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model name |
+| `VECTOR_DIM` | `1024` | Embedding vector dimensionality |
+| `LLM_MODEL` | `qwen3:4b` | Ollama chat model for answer generation |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for LLM |
+| `GEMINI_API_KEY` | — | Google Gemini API key (required when `EMBEDDING_PROVIDER=gemini`) |
+| `ADMIN_API_KEY` | — | Secret key for `x-api-key` header on `/api/v1/documents` |
 
-```ini
-# PostgreSQL
-DB_HOST=localhost
-DB_PORT=5434
-DB_NAME=vectordb
-DB_USER=postgres
-DB_PASS=your_password_here
-MAX_DISTANCE=0.5
+### 3. Start PostgreSQL & pgvector
 
-# AI Provider
-OLLAMA_HOST=http://127.0.0.1:11434
-EMBEDDING_MODEL=qwen3-embedding:0.6b
-VECTOR_DIM=1024
-LLM_MODEL=qwen3:4b
-LLM_TEMPERATURE=0.2
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Admin API authentication (required for /api/v1/documents endpoints)
-ADMIN_API_KEY=your_admin_api_key_here
-```
-
-### 3. Start the database
+Copy `docker-compose.example.yml` to `docker-compose.yml` (adjust credentials if needed) and start the services:
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml
-# Update POSTGRES_PASSWORD in docker-compose.yml (or set ${DB_PASS}) to match DB_PASS
 docker compose up -d
 ```
 
-Adminer is available at `http://localhost:8080`.
+This starts:
+- **PostgreSQL 16 + pgvector** on `localhost:5434`
+- **Adminer** (web DB UI) on `http://localhost:8080`
 
-### 4. Install dependencies
+### 4. Pull Ollama Models (if using Ollama)
 
 ```bash
-uv sync
+ollama pull qwen3-embedding:0.6b
+ollama pull qwen3:4b
 ```
 
-### 5. Ingest data
+### 5. Ingest Knowledge Base
+
+Load `data/data.txt` into the `documents` table:
 
 ```bash
 uv run python ingest.py
 ```
 
-This reads chunks from `data/data.txt`, embeds them into a staging table, then performs an atomic table swap to replace the production `documents` table — ensuring zero downtime if the process fails midway.
-
----
-
 ## Usage
 
-### CLI (Interactive)
+### Run the FastAPI Server
+
+```bash
+uv run uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Interactive API docs will be available at `http://localhost:8000/docs`.
+
+#### API Endpoints
+
+- **`GET /health`** — Readiness check verifying PostgreSQL connectivity.
+- **`POST /api/v1/chat`** — Query the RAG chatbot.
+  ```bash
+  curl -X POST http://localhost:8000/api/v1/chat \
+    -H "Content-Type: application/json" \
+    -d '{"query": "Thứ Bảy đường sách Lục Bình mở cửa đến mấy giờ?", "top_k": 5}'
+  ```
+- **`POST /api/v1/documents`** *(Admin)* — Add a new document to both PostgreSQL and `data/data.txt`.
+  ```bash
+  curl -X POST http://localhost:8000/api/v1/documents \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: your_admin_api_key_here" \
+    -d '{"content": "Sách: Ví Dụ Mới. Tác giả: Nguyễn Văn A. Giá: 85.000đ."}'
+  ```
+- **`GET /api/v1/documents?limit=50&offset=0`** *(Admin)* — List stored documents.
+  ```bash
+  curl http://localhost:8000/api/v1/documents?limit=20&offset=0 \
+    -H "x-api-key: your_admin_api_key_here"
+  ```
+
+### Run the Interactive CLI
 
 ```bash
 uv run python main.py
 ```
 
-Type a question, get an answer. Type `exit` to quit.
+Type your question in Vietnamese or English. Enter `exit`, `quit`, or `q` to stop.
 
-### REST API
+### Run Evaluation
 
-```bash
-uv run uvicorn api:app --reload --port 8000
-```
-
-**Swagger UI**: `http://localhost:8000/docs`
-
-**Endpoints**:
-
-| Method | Path | Auth | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Public | DB readiness check (`503` if DB is unreachable) |
-| `POST` | `/api/v1/chat` | Public | Send a question, get RAG-powered answer |
-| `POST` | `/api/v1/documents` | `X-API-Key` (`ADMIN_API_KEY`) | Add a document to DB and `data/data.txt` |
-| `GET` | `/api/v1/documents` | `X-API-Key` (`ADMIN_API_KEY`) | List stored documents (`limit`, `offset`) |
-
-**Example request**:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Đường sách có quán cà phê nào không?", "top_k": 2}'
-```
-
-**Example response**:
-
-```json
-{
-  "query": "Đường sách có quán cà phê nào không?",
-  "ans": "Quán cà phê Đỗ Phủ tại đường sách phục vụ cà phê bơ rất ngon...",
-  "sources": [
-    "Quán cà phê Đỗ Phủ tại đường sách phục vụ cà phê bơ rất ngon."
-  ]
-}
-```
-
-### Evaluation
+Benchmark retrieval hit-rate and end-to-end answer accuracy against `CASES` in `evaluate.py`:
 
 ```bash
 uv run python evaluate.py
 ```
 
-Runs the benchmark suite (`CASES` in `evaluate.py`) covering retrieval completeness, answer accuracy, and out-of-scope refusal.
+## Testing & Code Quality
 
----
-
-## Testing
-
-**Unit tests** (no Docker/Ollama required):
+### Run Unit Tests
 
 ```bash
-uv run pytest tests/unit -v
+uv run pytest tests/unit
 ```
 
-**Integration tests** (requires running PostgreSQL + Ollama):
+### Run Integration Tests
 
-```powershell
-# PowerShell
-$env:ALLOW_DESTRUCTIVE_TESTS="true"
-uv run pytest tests/integration -v
+Integration tests drop/recreate tables, so `tests/conftest.py` enforces that `DB_NAME` (or `TEST_DB_NAME`) starts with `test_`, ends with `_test`, or equals `test`:
+
+```bash
+TEST_DB_NAME=vectordb_test uv run pytest tests/integration
 ```
 
----
+### Linting
 
-## Project Structure
-
-```text
-dgsach-chatbot/
-├── data/
-│   └── data.txt                    # Example knowledge base (book street info)
-├── src/
-│   ├── database.py                 # DB connection & schema init
-│   ├── migration.py                # Atomic staging table swap
-│   ├── embeddings.py               # Ollama & Gemini embedding clients
-│   ├── retriever.py                # Dense retriever (for searching documents)
-│   └── llm.py                      # Prompt template & LLM generation
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
-├── api.py                          # FastAPI endpoints
-├── evaluate.py                     # Retrieval & answer evaluation script
-├── ingest.py                       # Data ingestion pipeline
-├── main.py                         # CLI chat loop
-├── pyproject.toml                  # Project metadata & dependencies (uv)
-├── uv.lock                         # Locked dependency versions
-├── .env.example
-└── docker-compose.example.yml
+```bash
+uv run ruff check .
 ```
 
+## Author
+
+- **The Hoang** — [phanthehoang2503@gmail.com](mailto:phanthehoang2503@gmail.com)
