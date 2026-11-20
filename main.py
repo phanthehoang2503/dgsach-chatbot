@@ -20,7 +20,7 @@ def main():
                 break
 
             # 1. Truy xuất
-            ctx = retrieve_ctx(query, top_k=2)
+            ctx = retrieve_ctx(query, top_k=5)
 
             # 2. LLM generate câu trả lời
             print("Đang xử lý câu trả lời...")
