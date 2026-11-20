@@ -5,7 +5,7 @@ from typing import Protocol
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv()
 
 
 class Embedder(Protocol):
