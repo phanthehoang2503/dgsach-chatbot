@@ -1,13 +1,16 @@
 import logging
 import os
 import secrets
+from contextlib import contextmanager
 from typing import Annotated
 
+import psycopg
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field, StringConstraints
 
 from ingest import add_document, list_documents
+from src.database import get_connection
 from src.llm import generate_answer
 from src.retriever import retrieve_ctx
 
@@ -56,20 +59,49 @@ def require_admin(x_api_key: str = Header(default="")):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key không hợp lệ")
 
 
+@contextmanager
+def _handle_endpoint_errors(unexpected_msg: str):
+    try:
+        yield
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except (psycopg.Error, ConnectionError, TimeoutError) as exc:
+        logger.exception(unexpected_msg)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Dịch vụ tạm thời không khả dụng",
+        ) from exc
+    except Exception as exc:
+        logger.exception(unexpected_msg)
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, unexpected_msg
+        ) from exc
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    try:
+        with get_connection(register_pgvector=False) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.exception("Database readiness check failed")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Database is unreachable"
+        ) from exc
 
 
 @app.post("/api/v1/chat", response_model=ChatRes)
 def chat_endpoint(req: ChatReq):
-    try:
+    with _handle_endpoint_errors("Không thể xử lý câu hỏi"):
         sources = retrieve_ctx(req.query, top_k=req.top_k)
         answer = generate_answer(req.query, sources)
         return ChatRes(query=req.query, ans=answer, sources=sources)
-    except Exception:
-        logger.exception("Lỗi khi xử lý chat")
-        raise HTTPException(500, "Không thể xử lý câu hỏi")
 
 
 @app.post(
@@ -79,12 +111,9 @@ def chat_endpoint(req: ChatReq):
     dependencies=[Depends(require_admin)],
 )
 def create_document(req: DocumentReq):
-    try:
-        doc_id = add_document(req.content)
-        return DocumentRes(id=doc_id, content=" ".join(req.content.split()))
-    except Exception:
-        logger.exception("Lỗi khi thêm tài liệu")
-        raise HTTPException(500, "Không thể thêm tài liệu lúc này")
+    with _handle_endpoint_errors("Không thể thêm tài liệu lúc này"):
+        doc_id, content = add_document(req.content)
+        return DocumentRes(id=doc_id, content=content)
 
 
 @app.get(
@@ -96,9 +125,6 @@ def create_document(req: DocumentReq):
 def get_documents(
     limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)
 ):
-    try:
+    with _handle_endpoint_errors("Không thể đọc tài liệu lúc này"):
         rows = list_documents(limit, offset)
         return [DocumentRes(id=doc_id, content=content) for doc_id, content in rows]
-    except Exception:
-        logger.exception("Lỗi khi đọc tài liệu")
-        raise HTTPException(500, "Không thể đọc tài liệu lúc này")
