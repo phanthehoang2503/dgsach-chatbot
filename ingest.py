@@ -1,21 +1,26 @@
-from src.retriever import assert_index_matches
-from src.migration import swap_table
-from src.embeddings import get_embedder
 import os
+import threading
 import uuid
+from pathlib import Path
 
-from psycopg import sql
-from src.database import get_connection, init_db
 from dotenv import load_dotenv
+from psycopg import sql
+
+from src.database import get_connection, init_db
+from src.embeddings import get_embedder
+from src.migration import swap_table
+from src.retriever import assert_index_matches
 
 load_dotenv()
 
-DATA_FILE = (
-    os.path.join("data", "data.txt")
-    if os.path.exists(os.path.join("data", "data.txt"))
-    else "data.txt"
+BASE_DIR = Path(__file__).resolve().parent
+DATA_FILE = str(
+    BASE_DIR / "data" / "data.txt"
+    if (BASE_DIR / "data" / "data.txt").exists()
+    else BASE_DIR / "data.txt"
 )
-VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))  # VD: qwen3-embedding:0.6b
+VECTOR_DIM = int(os.getenv("VECTOR_DIM") or "1024")  # VD: qwen3-embedding:0.6b
+_doc_write_lock = threading.Lock()
 
 
 def load_chunks(file_path: str) -> list[str]:
@@ -44,52 +49,64 @@ def ingest_data(file_path: str = DATA_FILE):
 
     # Embedding và lưu vào DB
     print("3. đang tạo embedding và staging...")
-    embedder = get_embedder()
+    insert_stmt = sql.SQL(
+        "INSERT INTO {} (content, embedding) VALUES (%s, %s);"
+    ).format(sql.Identifier(staging_table))
+    comment_stmt = sql.SQL("COMMENT ON TABLE {} IS {};")
     try:
+        embedder = get_embedder()
         with get_connection() as conn:
             with conn.cursor() as cur:
                 for idx, chunk in enumerate(chunks, 1):
                     vec = embedder.embed_document(chunk)
-                    cur.execute(
-                        f"INSERT INTO {staging_table} (content, embedding) VALUES (%s, %s);",
-                        (chunk, vec),
-                    )
+                    cur.execute(insert_stmt, (chunk, vec))
                     print(f" -> [{idx}/{total}] đã nạp: {chunk[:40]}...")
                 cur.execute(
-                    sql.SQL("COMMENT ON TABLE {} IS {};").format(
+                    comment_stmt.format(
                         sql.Identifier(staging_table),
                         sql.Literal(embedder.fingerprint),
                     )
                 )
         print(f"Hoàn tất nạp {total} đoạn vào vector database.")
+
+        # commit staging
+        print("4. Commit staging...")
+        swap_table(staging_table=staging_table, target_table="documents")
+        print(f"Đã nạp {total} đoạn vào vector db thành công.")
     except Exception as e:
         print(f"Lỗi trong quá trình embedding/nạp: {e}")
+        try:
+            with get_connection(register_pgvector=False) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("DROP TABLE IF EXISTS {};").format(
+                            sql.Identifier(staging_table)
+                        )
+                    )
+        except Exception as cleanup_err:
+            print(f"Không thể dọn bảng staging {staging_table}: {cleanup_err}")
         raise
 
-    # commit staging
-    print("4. Commit staging...")
-    swap_table(staging_table=staging_table, target_table="documents")
-    print(f"Đã nạp {total} đoạn vào vector db thành công.")
 
-
-def add_document(text: str, file_path: str = DATA_FILE) -> int:
+def add_document(text: str, file_path: str = DATA_FILE) -> tuple[int, str]:
     """Thêm một tài liệu vào DB và data.txt để không mất khi ingest lại."""
-    text = " ".join(text.split())  # data.txt quy ước mỗi dòng là một tài liệu
+    content = " ".join(text.split())  # data.txt quy ước mỗi dòng là một tài liệu
     embedder = get_embedder()
-    vec = embedder.embed_document(text)
+    vec = embedder.embed_document(content)
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            assert_index_matches(cur, embedder.fingerprint)
-            cur.execute(
-                "INSERT INTO documents (content, embedding) VALUES (%s, %s) RETURNING id;",
-                (text, vec),
-            )
-            doc_id = cur.fetchone()[0]
+    with _doc_write_lock:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                assert_index_matches(cur, embedder.fingerprint)
+                cur.execute(
+                    "INSERT INTO documents (content, embedding) VALUES (%s, %s) RETURNING id;",
+                    (content, vec),
+                )
+                doc_id = cur.fetchone()[0]
 
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(f"\n{text}\n")
-    return doc_id
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(f"\n{content}\n")
+    return doc_id, content
 
 
 def list_documents(limit: int = 50, offset: int = 0) -> list[tuple[int, str]]:

@@ -1,7 +1,7 @@
 import unicodedata
 
 from src.llm import generate_answer
-from src.retriever import retrieve_ctx, retrieve_with_scores
+from src.retriever import _get_max_distance, retrieve_with_scores
 
 TOP_K = 5
 REFUSAL_PHRASES = ["không tìm thấy", "couldn't find", "chỉ hỗ trợ", "can only help"]
@@ -133,19 +133,27 @@ def chunk_distances(case, rows):
 
 
 def main():
+    max_distance = _get_max_distance()
     answer_ok = retrieval_ok = answerable = 0
     required_distances, refuse_distances = [], []
 
     for case in CASES:
         question = case["question"]
         rows = retrieve_with_scores(question, TOP_K)
-        answer = generate_answer(question, retrieve_ctx(question, TOP_K))
+        ctx = [
+            content
+            for content, distance in rows
+            if distance is not None and distance <= max_distance
+        ]
+        answer = generate_answer(question, ctx)
         passed = check_answer(case, answer)
         answer_ok += passed
         retrieval_note = "từ chối"
+        top_distance = rows[0][1] if rows else None
 
         if case["refuse"]:
-            refuse_distances.append(rows[0][1])
+            if top_distance is not None:
+                refuse_distances.append(top_distance)
         else:
             answerable += 1
             distances = chunk_distances(case, rows)
@@ -155,8 +163,9 @@ def main():
             if found:
                 required_distances.append(max(distances))
 
+        dist_str = f"{top_distance:.3f}" if top_distance is not None else "N/A"
         print(
-            f"[{'OK ' if passed else 'SAI'}] ({retrieval_note}) d={rows[0][1]:.3f} | {question}"
+            f"[{'OK ' if passed else 'SAI'}] ({retrieval_note}) d={dist_str} | {question}"
         )
         if not passed:
             print(f"      Trả lời: {answer}")
@@ -166,7 +175,8 @@ def main():
     print(f"Truy xuất đủ đoạn: {retrieval_ok}/{answerable}")
     if required_distances:
         print(f"Distance lớn nhất cần giữ: {max(required_distances):.3f}")
-    print(f"Distance nhỏ nhất của câu phải từ chối: {min(refuse_distances):.3f}")
+    if refuse_distances:
+        print(f"Distance nhỏ nhất của câu phải từ chối: {min(refuse_distances):.3f}")
 
 
 if __name__ == "__main__":
